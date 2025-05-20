@@ -1,0 +1,34 @@
+{
+  "mmtp": {
+    "serverHost": "localhost",
+    "serverPort": 8025,
+    "securePort": 8026,
+    "useTLS": true,
+    "usePGP": true,
+    "keyStorePath": "keystore"
+  },
+  "smtp": {
+    "port": 2525,
+    "host": "0.0.0.0",
+    "secure": false,
+    "authMethods": ["PLAIN", "LOGIN"],
+    "authOptional": true
+  },
+  "smtpRelay": {
+    "host": "smtp.example.com",
+    "port": 587,
+    "secure": false,
+    "auth": {
+      "user": "user@example.com",
+      "pass": "password"
+    }
+  },
+  "domainMapping": {
+    "mmtp.example.com": true,
+    "secure-mail.org": true
+  },
+  "users": {
+    "admin": { "password": "admin-password" },
+    "testuser": { "password": "test-password" }
+  }
+} 
