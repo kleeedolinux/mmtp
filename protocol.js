@@ -9,6 +9,12 @@ class MMTPProtocol {
     this.usePGP = options.usePGP ?? false;
     this.keyStorePath = options.keyStorePath || path.join(process.cwd(), 'keystore');
     this.publicKeys = new Map(); 
+    this.tagCategories = {
+      priority: ['high', 'medium', 'low'],
+      category: ['personal', 'work', 'finance', 'social', 'promotion', 'coupon', 'shop', 'notification'],
+      status: ['urgent', 'important', 'information', 'action_required'],
+      custom: [] 
+    };
     if (this.usePGP) {
       fs.ensureDirSync(this.keyStorePath);
     }
@@ -22,6 +28,7 @@ class MMTPProtocol {
     const messageContent = { subject, body };
     const messageHash = this.generateSHA256(JSON.stringify(messageContent));
     const hashcashToken = this.generateHashCash(from, to, timestamp);
+    const tags = this.processTags(options.tags || []);
     const packet = {
       meta: {
         type,
@@ -29,7 +36,8 @@ class MMTPProtocol {
         timestamp,
         hashcashToken,
         encrypted: false,
-        signed: false
+        signed: false,
+        tags: tags 
       },
       sender: from,
       recipient: to,
@@ -72,6 +80,9 @@ class MMTPProtocol {
     return packet;
   }
   async createReplyPacket(originalPacket, from, body, options = {}) {
+    if (!options.tags && originalPacket.meta.tags) {
+      options.tags = originalPacket.meta.tags;
+    }
     return this.createMessagePacket(
       from,
       originalPacket.sender,
@@ -115,6 +126,49 @@ class MMTPProtocol {
     const { token, counter } = packet.meta.hashcashToken;
     const hash = this.generateSHA256(token);
     return hash.startsWith('0'.repeat(this.difficulty));
+  }
+  processTags(tags) {
+    if (!tags || (Array.isArray(tags) && tags.length === 0) || 
+        (typeof tags === 'object' && Object.keys(tags).length === 0)) {
+      return {};
+    }
+    if (Array.isArray(tags)) {
+      return { custom: tags };
+    }
+    const processedTags = {};
+    for (const [category, tagList] of Object.entries(tags)) {
+      if (this.tagCategories[category] !== undefined || category === 'custom') {
+        if (category !== 'custom' && Array.isArray(this.tagCategories[category])) {
+          processedTags[category] = tagList.filter(tag => 
+            this.tagCategories[category].includes(tag)
+          );
+        } else {
+          processedTags[category] = tagList;
+        }
+      }
+    }
+    return processedTags;
+  }
+  filterMessagesByTags(messages, tagFilters) {
+    if (!messages || !tagFilters || Object.keys(tagFilters).length === 0) {
+      return messages;
+    }
+    return messages.filter(message => {
+      if (!message.meta.tags || Object.keys(message.meta.tags).length === 0) {
+        return false;
+      }
+      for (const [category, filterTags] of Object.entries(tagFilters)) {
+        const messageTags = message.meta.tags[category] || [];
+        if (filterTags.length > 0 && messageTags.length === 0) {
+          return false;
+        }
+        const hasMatchingTag = filterTags.some(tag => messageTags.includes(tag));
+        if (!hasMatchingTag) {
+          return false;
+        }
+      }
+      return true;
+    });
   }
   async processPacket(packet, options = {}) {
     if (!this.verifyMessageIntegrity(packet)) {
@@ -256,6 +310,14 @@ class MMTPProtocol {
       cert: fs.readFileSync(certPath),
       key: fs.readFileSync(keyPath)
     };
+  }
+  getTagCategories() {
+    return this.tagCategories;
+  }
+  addCustomTag(tag) {
+    if (!this.tagCategories.custom.includes(tag)) {
+      this.tagCategories.custom.push(tag);
+    }
   }
 }
 module.exports = MMTPProtocol; 

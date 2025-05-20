@@ -130,6 +130,9 @@ class MMTPServer {
       case 'RECEIVE':
         await this.handleReceiveMail(request.data, socket);
         break;
+      case 'RECEIVE_FILTERED':
+        await this.handleReceiveFilteredMail(request.data, socket);
+        break;
       case 'CHECK':
         await this.handleCheckMail(request.data, socket);
         break;
@@ -138,6 +141,9 @@ class MMTPServer {
         break;
       case 'REQUEST_PUBLIC_KEY':
         await this.handleRequestPublicKey(request.data, socket);
+        break;
+      case 'GET_TAG_CATEGORIES':
+        await this.handleGetTagCategories(request.data, socket);
         break;
       default:
         socket.write(JSON.stringify({
@@ -214,8 +220,9 @@ class MMTPServer {
     }));
     delete this.mailboxes[email];
   }
-  async handleCheckMail(data, socket) {
-    const { email } = data;
+  async handleReceiveFilteredMail(data, socket) {
+    const { email, tagFilters } = data;
+    
     if (!this.protocol.validateEmailFormat(email)) {
       socket.write(JSON.stringify({
         status: 'ERROR',
@@ -223,11 +230,115 @@ class MMTPServer {
       }));
       return;
     }
-    const count = this.mailboxes[email] ? this.mailboxes[email].length : 0;
+    
+    if (!this.mailboxes[email] || this.mailboxes[email].length === 0) {
+      socket.write(JSON.stringify({
+        status: 'OK',
+        messages: [],
+        count: 0,
+        tagFilters
+      }));
+      return;
+    }
+    
+    // Process messages (decrypt if needed)
+    if (this.usePGP) {
+      for (let i = 0; i < this.mailboxes[email].length; i++) {
+        const packet = this.mailboxes[email][i];
+        if (packet.meta.encrypted) {
+          const processedPacket = await this.protocol.processPacket(
+            packet,
+            { recipientEmail: email }
+          );
+          if (processedPacket.success) {
+            this.mailboxes[email][i] = processedPacket.packet;
+          }
+        }
+      }
+    }
+    
+    // Apply tag filtering
+    let filteredMessages = this.mailboxes[email];
+    if (tagFilters && Object.keys(tagFilters).length > 0) {
+      filteredMessages = this.protocol.filterMessagesByTags(
+        filteredMessages,
+        tagFilters
+      );
+      
+      // Remove filtered messages from mailbox
+      this.mailboxes[email] = this.mailboxes[email].filter(message => 
+        !filteredMessages.some(m => m.meta.messageId === message.meta.messageId)
+      );
+    } else {
+      // If no filters, remove all messages as they all are being retrieved
+      delete this.mailboxes[email];
+    }
+    
     socket.write(JSON.stringify({
       status: 'OK',
-      count
+      messages: filteredMessages,
+      count: filteredMessages.length,
+      tagFilters
     }));
+  }
+  async handleGetTagCategories(data, socket) {
+    socket.write(JSON.stringify({
+      status: 'OK',
+      tagCategories: this.protocol.getTagCategories()
+    }));
+  }
+  async handleCheckMail(data, socket) {
+    const { email, tagFilters } = data;
+    
+    if (!this.protocol.validateEmailFormat(email)) {
+      socket.write(JSON.stringify({
+        status: 'ERROR',
+        message: 'Invalid email format'
+      }));
+      return;
+    }
+    
+    const messages = this.mailboxes[email] || [];
+    let filteredCount = messages.length;
+    let tagCounts = {};
+    
+    // Count messages by tag categories
+    if (messages.length > 0) {
+      // Calculate tag counts
+      tagCounts = this.countMessagesByTags(messages);
+      
+      // Apply filters if provided
+      if (tagFilters && Object.keys(tagFilters).length > 0) {
+        const filteredMessages = this.protocol.filterMessagesByTags(messages, tagFilters);
+        filteredCount = filteredMessages.length;
+      }
+    }
+    
+    socket.write(JSON.stringify({
+      status: 'OK',
+      count: filteredCount,
+      totalCount: messages.length,
+      tagCounts
+    }));
+  }
+  countMessagesByTags(messages) {
+    const counts = {};
+    
+    messages.forEach(message => {
+      if (message.meta.tags && Object.keys(message.meta.tags).length > 0) {
+        Object.entries(message.meta.tags).forEach(([category, tags]) => {
+          if (!counts[category]) {
+            counts[category] = {};
+          }
+          
+          tags.forEach(tag => {
+            counts[category][tag] = (counts[category][tag] || 0) + 1;
+          });
+        });
+      }
+    });
+    
+    return counts;
   }
   async handleRegisterKey(data, socket) {
     if (!this.usePGP) {

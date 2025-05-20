@@ -50,6 +50,8 @@ async function testMMTP() {
       console.log('\nTest 4: Testing secure messaging...');
       await testSecureMessaging();
     }
+    console.log('\nTest 5: Testing tag system...');
+    await testTagSystem();
     console.log('\nAll tests completed successfully! 🎉');
   } catch (error) {
     console.error('\n❌ Test failed:', error.message);
@@ -235,6 +237,143 @@ async function testSecureMessaging() {
       console.log(`   ✓ Reply content: "${replyMessage.content.subject}" - ${replyMessage.content.body}`);
     }
   }
+  alice.disconnect();
+  bob.disconnect();
+}
+async function testTagSystem() {
+  const alice = new MMTPClient({
+    serverHost: 'localhost',
+    serverPort: TEST_CONFIG.serverPort,
+    securePort: TEST_CONFIG.securePort,
+    useTLS: TEST_CONFIG.useTLS,
+    usePGP: false
+  });
+  
+  const bob = new MMTPClient({
+    serverHost: 'localhost',
+    serverPort: TEST_CONFIG.serverPort,
+    securePort: TEST_CONFIG.securePort,
+    useTLS: TEST_CONFIG.useTLS,
+    usePGP: false
+  });
+  
+  await alice.connect(TEST_CONFIG.useTLS);
+  await bob.connect(TEST_CONFIG.useTLS);
+  
+  console.log('   Getting available tag categories...');
+  const tagCategories = alice.getTagCategories();
+  console.log(`   ✓ Available tag categories: ${Object.keys(tagCategories).join(', ')}`);
+  
+  // Test adding a custom tag
+  console.log('   Adding a custom tag...');
+  const customTagResult = alice.addCustomTag('newsletter');
+  console.log(`   ✓ Added custom tag: ${customTagResult.tag}`);
+  
+  // Send messages with different tags
+  console.log('   Sending messages with different tags...');
+  
+  // Promotion message with coupon tag
+  await alice.sendMail(
+    EMAILS.alice, 
+    EMAILS.bob, 
+    '20% Off Sale!', 
+    'Use code MMTP20 for 20% off your purchase.',
+    {
+      tags: {
+        category: ['promotion', 'coupon'],
+        priority: ['medium']
+      }
+    }
+  );
+  
+  // Personal message with high priority
+  await alice.sendMail(
+    EMAILS.alice, 
+    EMAILS.bob, 
+    'Urgent: Meeting Today', 
+    'Please join our team meeting at 2pm.',
+    {
+      tags: {
+        category: ['personal'],
+        priority: ['high'],
+        status: ['urgent']
+      }
+    }
+  );
+  
+  // Work message with custom tag
+  await alice.sendMail(
+    EMAILS.alice, 
+    EMAILS.bob, 
+    'Weekly Newsletter', 
+    'Here is this week\'s company newsletter.',
+    {
+      tags: {
+        category: ['work'],
+        priority: ['low'],
+        custom: ['newsletter']
+      }
+    }
+  );
+  
+  console.log('   ✓ Sent 3 messages with different tags');
+  
+  // Check mail with tag statistics
+  console.log('   Checking mail with tag statistics...');
+  const checkResult = await bob.checkMail(EMAILS.bob);
+  console.log(`   ✓ Bob has ${checkResult.count} message(s)`);
+  
+  if (checkResult.tagCounts) {
+    console.log('   ✓ Tag statistics available:');
+    for (const [category, tags] of Object.entries(checkResult.tagCounts)) {
+      console.log(`     - ${category}: ${Object.entries(tags).map(([tag, count]) => `${tag} (${count})`).join(', ')}`);
+    }
+  }
+  
+  // Test filtering by tags
+  console.log('   Receiving only promotional messages...');
+  const promoResult = await bob.receiveMailByTags(EMAILS.bob, {
+    category: ['promotion']
+  });
+  console.log(`   ✓ Received ${promoResult.messages.length} promotional message(s)`);
+  
+  if (promoResult.messages.length > 0) {
+    const message = promoResult.messages[0];
+    console.log(`   ✓ Message content: "${message.content.subject}" - ${message.content.body.substring(0, 30)}...`);
+    console.log(`   ✓ Message tags: ${JSON.stringify(message.meta.tags)}`);
+  }
+  
+  // Check remaining messages
+  console.log('   Checking remaining messages...');
+  const remainingCheck = await bob.checkMail(EMAILS.bob);
+  console.log(`   ✓ Bob still has ${remainingCheck.count} unread message(s)`);
+  
+  // Receive high priority messages
+  console.log('   Receiving only high priority messages...');
+  const highPriorityResult = await bob.receiveMailByTags(EMAILS.bob, {
+    priority: ['high']
+  });
+  console.log(`   ✓ Received ${highPriorityResult.messages.length} high priority message(s)`);
+  
+  if (highPriorityResult.messages.length > 0) {
+    const message = highPriorityResult.messages[0];
+    console.log(`   ✓ Message content: "${message.content.subject}" - ${message.content.body.substring(0, 30)}...`);
+    console.log(`   ✓ Message tags: ${JSON.stringify(message.meta.tags)}`);
+  }
+  
+  // Receive all remaining messages
+  console.log('   Receiving all remaining messages...');
+  const remainingMessages = await bob.receiveMail(EMAILS.bob);
+  console.log(`   ✓ Received ${remainingMessages.messages.length} remaining message(s)`);
+  
+  if (remainingMessages.messages.length > 0) {
+    const message = remainingMessages.messages[0];
+    console.log(`   ✓ Final message content: "${message.content.subject}" - ${message.content.body.substring(0, 30)}...`);
+    if (message.meta.tags) {
+      console.log(`   ✓ Message tags: ${JSON.stringify(message.meta.tags)}`);
+    }
+  }
+  
   alice.disconnect();
   bob.disconnect();
 }

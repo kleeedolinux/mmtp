@@ -99,6 +99,7 @@ class MMTPClient {
     const messageOptions = {
       encrypt: this.usePGP && options.encrypt !== false,
       sign: this.usePGP && options.sign !== false,
+      tags: options.tags || {},
       ...options
     };
     const packet = await this.protocol.createMessagePacket(from, to, subject, body, 'SEND', messageOptions);
@@ -127,6 +128,7 @@ class MMTPClient {
     const messageOptions = {
       encrypt: this.usePGP && options.encrypt !== false,
       sign: this.usePGP && options.sign !== false,
+      tags: options.tags || (originalMessagePacket.meta.tags || {}),
       ...options
     };
     const packet = await this.protocol.createReplyPacket(originalMessagePacket, from, body, messageOptions);
@@ -198,11 +200,44 @@ class MMTPClient {
       }
     });
   }
-  async generateKeys(email, name, passphrase = '') {
+  receiveMailByTags(email, tagFilters) {
+    if (!this.connected) {
+      throw new Error('Not connected to MMTP server');
+    }
+    if (!this.protocol.validateEmailFormat(email)) {
+      throw new Error('Invalid email format. Must be (name)%(domain)');
+    }
+    const request = {
+      action: 'RECEIVE_FILTERED',
+      data: {
+        email,
+        tagFilters
+      }
+    };
+    return new Promise((resolve, reject) => {
+      try {
+        this.socket.write(JSON.stringify(request));
+        const timeout = setTimeout(() => {
+          reject(new Error('Request timed out'));
+        }, 10000);
+        this.waitingResponses.set('RECEIVE_FILTERED', { resolve, reject, timeout });
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }
+  getTagCategories() {
+    return this.protocol.getTagCategories();
+  }
+  addCustomTag(tag) {
+    this.protocol.addCustomTag(tag);
+    return { success: true, tag };
+  }
+  async generateKeys(email, name, passphrase = '', standardEmail = '') {
     if (!this.usePGP) {
       throw new Error('PGP support is not enabled');
     }
-    return this.protocol.generateKeyPair(email, name, passphrase);
+    return this.protocol.generateKeyPair(email, name, passphrase, standardEmail);
   }
   async registerPublicKey(email) {
     if (!this.connected) {
@@ -271,6 +306,14 @@ class MMTPClient {
           this.protocol.importPublicKey(response.email, response.publicKey)
             .then(() => resolve(response))
             .catch((error) => reject(error));
+        } else if (action === 'RECEIVE_FILTERED' && response.messages) {
+          if (response.tagFilters) {
+            response.messages = this.protocol.filterMessagesByTags(
+              response.messages, 
+              response.tagFilters
+            );
+          }
+          resolve(response);
         } else {
           resolve(response);
         }

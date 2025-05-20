@@ -51,7 +51,8 @@ Messages within MMTP are constructed as JSON packets. This design choice promote
     hashcashToken: Object, // The anti-spam proof-of-work token
     encrypted: Boolean,   // Flag indicating if the message content is PGP encrypted
     signed: Boolean,      // Flag indicating if the message is PGP signed
-    signatureVerified: Boolean // Status of PGP signature verification by the server
+    signatureVerified: Boolean, // Status of PGP signature verification by the server
+    tags: Object          // Message categorization tags (e.g., priority, category, etc.)
   },
   sender: String,         // Sender's address in (name)%(domain) format
   recipient: String,      // Recipient's address in (name)%(domain) format
@@ -80,6 +81,21 @@ A key component of MMTP's anti-spam strategy is the HashCash token. Senders must
   counter: Number  // The counter value that satisfies the HashCash computation
 }
 ```
+
+### Message Tagging System
+
+MMTP includes a flexible tagging system that allows messages to be categorized and filtered. Tags help organize messages and enable efficient retrieval based on specific criteria. The tag structure follows this format:
+
+```javascript
+tags: {
+  priority: ['high', 'medium', 'low'],               // Message priority level
+  category: ['personal', 'work', 'promotion', ...],  // Content category
+  status: ['urgent', 'important', 'information', ...], // Message status
+  custom: ['any-user-defined-tag', ...]              // Custom user-defined tags
+}
+```
+
+Each tag category contains an array of tag values. The protocol includes predefined categories and values, but also supports custom tags for flexibility.
 
 ## Available Actions and Server Endpoints
 
@@ -135,14 +151,18 @@ To retrieve messages, a client uses the `RECEIVE` action, specifying the email a
 
 ### 3. CHECK
 
-The `CHECK` action allows a client to quickly determine if there are any messages waiting for a particular email address without downloading them. The server responds with a count of pending messages.
+The `CHECK` action allows a client to quickly determine if there are any messages waiting for a particular email address without downloading them. The server responds with a count of pending messages and tag statistics.
 
 **Request:**
 ```javascript
 {
   action: 'CHECK',
   data: {
-    email: '(name)%(domain)'
+    email: '(name)%(domain)',
+    tagFilters: {  // Optional - filter count by specific tags
+      category: ['promotion', 'coupon'],
+      priority: ['high']
+    }
   }
 }
 ```
@@ -151,7 +171,21 @@ The `CHECK` action allows a client to quickly determine if there are any message
 ```javascript
 {
   status: 'OK',
-  count: Number // Number of messages waiting
+  count: Number,     // Number of messages matching filters (if provided)
+  totalCount: Number, // Total number of messages waiting
+  tagCounts: {       // Statistics about tags in the mailbox
+    category: {
+      'promotion': 5,
+      'personal': 2,
+      // other categories and counts...
+    },
+    priority: {
+      'high': 3,
+      'medium': 4,
+      // other priorities and counts...
+    }
+    // other tag categories...
+  }
 }
 ```
 
@@ -201,6 +235,59 @@ To obtain the public PGP key for a specific email address (for encrypting a mess
 }
 ```
 
+### 6. RECEIVE_FILTERED
+
+To retrieve messages matching specific tag criteria, a client uses the `RECEIVE_FILTERED` action, specifying the email address and tag filters.
+
+**Request:**
+```javascript
+{
+  action: 'RECEIVE_FILTERED',
+  data: {
+    email: '(name)%(domain)',
+    tagFilters: {
+      category: ['promotion', 'coupon'],  // Only retrieve messages with these category tags
+      priority: ['high']                 // And with this priority tag
+    }
+  }
+}
+```
+
+**Response:**
+```javascript
+{
+  status: 'OK',
+  messages: [ /* Array of message packets matching the tag filters */ ],
+  count: Number, // Total number of messages retrieved
+  tagFilters: { /* Echo of the provided tag filters */ }
+}
+```
+
+### 7. GET_TAG_CATEGORIES
+
+To retrieve available tag categories and their predefined values, a client can use the `GET_TAG_CATEGORIES` action.
+
+**Request:**
+```javascript
+{
+  action: 'GET_TAG_CATEGORIES',
+  data: {}
+}
+```
+
+**Response:**
+```javascript
+{
+  status: 'OK',
+  tagCategories: {
+    priority: ['high', 'medium', 'low'],
+    category: ['personal', 'work', 'finance', 'social', 'promotion', 'coupon', 'shop', 'notification'],
+    status: ['urgent', 'important', 'information', 'action_required'],
+    custom: [] // User-defined tags
+  }
+}
+```
+
 ## Security: A Core Tenet of MMTP
 
 Security is a foundational principle of MMTP, woven into its design rather than being an optional overlay. The protocol incorporates several layers of protection to ensure confidential and authentic communication.
@@ -229,7 +316,7 @@ If all these checks pass successfully, the server accepts the message and stores
 
 ## Getting Started with MMTP
 
-Setting up MMTP on your system is a straightforward process. Here’s what you need to know to begin.
+Setting up MMTP on your system is a straightforward process. Here's what you need to know to begin.
 
 ### Prerequisites
 
@@ -281,7 +368,7 @@ npm run test:secure
 
 ## Client Usage in Your Application: An Example
 
-To integrate MMTP communication into your own Node.js applications, you can utilize the provided client module. Here’s an illustrative example demonstrating how to connect to an MMTP server, manage PGP keys, and send a secure, encrypted, and signed message:
+To integrate MMTP communication into your own Node.js applications, you can utilize the provided client module. Here's an illustrative example demonstrating how to connect to an MMTP server, manage PGP keys, and send a secure, encrypted, and signed message:
 
 ```javascript
 const MMTPClient = require('./CLIENT/client.js');
@@ -323,17 +410,36 @@ async function main() {
     await client.requestPublicKey(recipientEmail); 
     console.log(`Requested public key for ${recipientEmail}.`);
     
-    // Compose and send an encrypted and signed message
+    // Compose and send an encrypted and signed message with tags
     const subject = 'Secure Greetings via MMTP';
     const body = 'This message is a demonstration of MMTPs end-to-end encryption and signing capabilities!';
     
     console.log(`Preparing to send mail from ${userEmail} to ${recipientEmail}...`);
     const sendResult = await client.sendMail(userEmail, recipientEmail, subject, body, {
       encrypt: true, // Encrypt the message content
-      sign: true     // Sign the message
+      sign: true,    // Sign the message
+      tags: {        // Add tags to categorize the message
+        priority: ['high'],
+        category: ['personal'],
+        status: ['important']
+      }
     });
     
     console.log('Mail sending process completed:', sendResult);
+    
+    // Check for messages with specific tags
+    console.log('Checking for high priority messages...');
+    const checkResult = await client.checkMail(userEmail, {
+      priority: ['high']
+    });
+    console.log(`Found ${checkResult.count} high priority messages out of ${checkResult.totalCount} total`);
+    
+    // Receive only messages with specific tags
+    console.log('Receiving only personal messages...');
+    const filteredMessages = await client.receiveMailByTags(userEmail, {
+      category: ['personal']
+    });
+    console.log(`Received ${filteredMessages.messages.length} personal messages`);
     
   } catch (error) {
     console.error('An error occurred during the MMTP client operations:', error);
@@ -397,6 +503,8 @@ Furthermore, MMTP includes an integrated public key infrastructure. This simplif
 While MMTP provides a robust core feature set for secure and efficient email transfer, its design also allows for future enhancements and adaptations. There are several areas where the protocol could be extended to offer even greater functionality.
 
 For instance, support for **multiple recipients** in a single message transaction, currently not a primary feature, could be a valuable addition for group communication. The handling of **attachments** is another area for formalization; while ad-hoc solutions like Base64 encoding within the message body are possible, a standardized approach could improve interoperability and efficiency.
+
+The **tagging system** could be further enhanced with hierarchical tags, tag inheritance, or automatic tag suggestions based on content analysis. Advanced filtering capabilities like boolean expressions or machine learning-based content categorization could improve message organization and retrieval.
 
 For better conversation tracking and organization, **message threading** capabilities could be introduced, perhaps via a `references` or `in-reply-to` field in the message metadata, similar to existing email standards. The protocol could also be extended to include more explicit **delivery status notifications**, providing senders with feedback on whether a message has been successfully delivered or if errors occurred.
 
