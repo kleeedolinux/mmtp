@@ -1,0 +1,20 @@
+{
+  "name": "mmtp",
+  "version": "1.0.0",
+  "description": "Modern Mail Transfer Protocol - A faster, more efficient email protocol",
+  "main": "index.js",
+  "scripts": {
+    "start:server": "node SERVER/server.js",
+    "start:client": "node CLIENT/client.js",
+    "test": "node test.js",
+    "test:secure": "node test-secure.js"
+  },
+  "dependencies": {
+    "crypto": "^1.0.1",
+    "crypto-js": "^4.1.1",
+    "openpgp": "^5.9.0",
+    "fs-extra": "^11.1.1"
+  },
+  "author": "",
+  "license": "MIT"
+} 
