@@ -15,6 +15,14 @@ const EMAILS = {
   alice: '(alice)%(example.com)',
   bob: '(bob)%(example.com)'
 };
+function formatNameForPGP(email) {
+  const match = email.match(/^\(([a-zA-Z0-9._-]+)\)%\(([a-zA-Z0-9.-]+)\)$/);
+  if (match) {
+    const [_, name, domain] = match;
+    return `${name}@${domain}`; 
+  }
+  return email;
+}
 async function testMMTP() {
   console.log('Starting MMTP test with security features...');
   console.log('----------------------------------------');
@@ -94,11 +102,13 @@ async function testKeyManagement() {
   });
   await alice.connect(TEST_CONFIG.useTLS);
   await bob.connect(TEST_CONFIG.useTLS);
+  const aliceEmail = formatNameForPGP(EMAILS.alice);
+  const bobEmail = formatNameForPGP(EMAILS.bob);
   console.log('   Generating PGP keys for Alice...');
-  const aliceKeysResult = await alice.generateKeys(EMAILS.alice, 'Alice User');
+  const aliceKeysResult = await alice.generateKeys(EMAILS.alice, 'Alice User', '', aliceEmail);
   console.log(`   ✓ Alice's keys generated successfully`);
   console.log('   Generating PGP keys for Bob...');
-  const bobKeysResult = await bob.generateKeys(EMAILS.bob, 'Bob User');
+  const bobKeysResult = await bob.generateKeys(EMAILS.bob, 'Bob User', '', bobEmail);
   console.log(`   ✓ Bob's keys generated successfully`);
   console.log('   Registering Alice\'s public key with server...');
   const aliceRegisterResult = await alice.registerPublicKey(EMAILS.alice);
@@ -184,6 +194,7 @@ async function testSecureMessaging() {
     await alice.requestPublicKey(EMAILS.bob);
     await bob.requestPublicKey(EMAILS.alice);
   } catch (error) {
+    console.log('   Note: Public keys already cached');
   }
   console.log('   Alice sends an encrypted and signed message to Bob...');
   const subject = 'Secure Message';

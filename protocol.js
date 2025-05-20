@@ -175,23 +175,37 @@ class MMTPProtocol {
       packet
     };
   }
-  async generateKeyPair(email, name, passphrase = '') {
+  async generateKeyPair(mmtpEmail, name, passphrase = '', standardEmail = '') {
     if (!this.usePGP) {
       throw new Error('PGP support is not enabled');
+    }
+    if (!this.validateEmailFormat(mmtpEmail)) {
+      throw new Error('Invalid MMTP email format. Must be (name)%(domain)');
+    }
+    let pgpEmail = standardEmail;
+    if (!pgpEmail) {
+      const match = mmtpEmail.match(/^\(([a-zA-Z0-9._-]+)\)%\(([a-zA-Z0-9.-]+)\)$/);
+      if (match) {
+        const [_, localPart, domain] = match;
+        pgpEmail = `${localPart}@${domain}`;
+      } else {
+        throw new Error('Failed to extract standard email format from MMTP email');
+      }
     }
     const { privateKey, publicKey } = await openpgp.generateKey({
       type: 'rsa',
       rsaBits: 4096,
-      userIDs: [{ name, email }],
+      userIDs: [{ name, email: pgpEmail }],
       passphrase
     });
-    const publicKeyPath = this.getPublicKeyPath(email);
-    const privateKeyPath = this.getPrivateKeyPath(email);
+    const publicKeyPath = this.getPublicKeyPath(mmtpEmail);
+    const privateKeyPath = this.getPrivateKeyPath(mmtpEmail);
     await fs.writeFile(publicKeyPath, publicKey);
     await fs.writeFile(privateKeyPath, privateKey);
-    this.publicKeys.set(email, await openpgp.readKey({ armoredKey: publicKey }));
+    this.publicKeys.set(mmtpEmail, await openpgp.readKey({ armoredKey: publicKey }));
     return {
-      email,
+      email: mmtpEmail,
+      standardEmail: pgpEmail,
       publicKeyPath,
       privateKeyPath
     };
